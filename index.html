@@ -441,7 +441,8 @@ document.getElementById('attack-btn').addEventListener('click',async()=>{
     fightBlock.appendChild(lootEntry);
   });
 
-  log.prepend(fightBlock);
+  log.appendChild(fightBlock);
+  log.scrollTop=log.scrollHeight;
   renderCharSheet();
   await loadInventory();
 });
