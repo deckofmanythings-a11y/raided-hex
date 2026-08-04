@@ -1,0 +1,235 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1">
+<title>Raided Hex</title>
+<script src="supabase-js.bundle.js?v=1"></script>
+<script src="discord-embedded-app-sdk.js?v=1"></script>
+<style>
+  :root{color-scheme:dark;}
+  body{margin:0;font-family:system-ui,sans-serif;background:#14101c;color:#eee0f5;min-height:100vh;}
+  #auth-status{display:none;padding:40px;text-align:center;font-size:14px;opacity:.8;}
+  #auth-status.show{display:block;}
+  #auth-discord-debug{font-size:11px;color:rgba(255,255,255,.5);margin-top:8px;word-break:break-word;font-family:monospace;text-align:center;}
+  .screen{display:none;max-width:480px;margin:0 auto;padding:20px;}
+  .screen.show{display:block;}
+  h1{font-size:20px;margin:0 0 16px;}
+  label{display:block;margin:14px 0 4px;font-size:13px;opacity:.8;}
+  input[type=text]{width:100%;box-sizing:border-box;padding:8px;border-radius:6px;border:1px solid #5a4a70;background:#221a30;color:#eee0f5;}
+  .class-grid{display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-top:8px;}
+  .class-card{border:1px solid #5a4a70;border-radius:8px;padding:10px;cursor:pointer;background:#221a30;}
+  .class-card.selected{border-color:#b48ce8;background:#33254a;}
+  .class-card b{display:block;font-size:14px;}
+  .class-card span{font-size:11px;opacity:.7;}
+  button{margin-top:18px;width:100%;padding:10px;border-radius:8px;border:none;background:#8452c9;color:#fff;font-size:15px;cursor:pointer;}
+  button:disabled{opacity:.5;cursor:default;}
+  #char-sheet{padding:16px;border:1px solid #5a4a70;border-radius:10px;background:#1c1526;}
+  #char-sheet .row{display:flex;justify-content:space-between;font-size:13px;padding:3px 0;}
+  #attack-log{margin-top:14px;font-size:13px;max-height:200px;overflow-y:auto;}
+  #attack-log div{padding:6px 0;border-bottom:1px solid #33254a;}
+  .dead-banner{background:#4a1622;border:1px solid #7a2a3d;border-radius:8px;padding:14px;text-align:center;margin-bottom:14px;}
+  .error-msg{color:#ff8a9a;font-size:13px;margin-top:8px;min-height:16px;}
+</style>
+</head>
+<body>
+
+<div id="auth-status">Connecting…</div>
+
+<div id="screen-create" class="screen">
+  <h1>Create Your Character</h1>
+  <label for="char-name">Name</label>
+  <input type="text" id="char-name" maxlength="24" placeholder="Kaelith the Bold">
+  <label>Class</label>
+  <div class="class-grid" id="class-grid"></div>
+  <button id="create-btn" disabled>Begin Your Legend</button>
+  <div class="error-msg" id="create-error"></div>
+</div>
+
+<div id="screen-game" class="screen">
+  <h1>Raided Hex</h1>
+  <div id="dead-banner" class="dead-banner" style="display:none">
+    Your character has fallen. <button id="reroll-btn" style="width:auto;padding:6px 14px;">Create a new character</button>
+  </div>
+  <div id="char-sheet"></div>
+  <div id="boss-info" style="margin-top:14px;font-size:14px;"></div>
+  <button id="attack-btn">Attack</button>
+  <div class="error-msg" id="attack-error"></div>
+  <div id="attack-log"></div>
+</div>
+
+<script>
+// ── Config ───────────────────────────────────────────────────────────────
+// isDiscordActivity() detection and the /.proxy/supabase URL rewrite mirror
+// heavenly-aces-casino/index.html exactly -- Discord Activities can only reach
+// external hosts through URL Mappings configured in the Developer Portal, which
+// rewrite a path prefix (here /.proxy/supabase) to the real Supabase origin.
+function isDiscordActivity(){return location.hostname.endsWith('.discordsays.com')||new URLSearchParams(location.search).has('frame_id');}
+function isDiscordDM(){const loc=new URLSearchParams(location.search).get('location_id');return !!loc&&loc.startsWith('pc-');}
+function withTimeout(promise,ms,label){return Promise.race([promise,new Promise((_,reject)=>setTimeout(()=>reject(new Error(label+' timed out')),ms))]);}
+
+// TODO fill in after creating the Supabase project and Discord application (see README.md).
+const SUPABASE_URL=isDiscordActivity()?(location.origin+'/.proxy/supabase'):'REPLACE_WITH_SUPABASE_URL';
+const FUNCTIONS_URL=SUPABASE_URL+'/functions/v1';
+const SUPABASE_ANON_KEY='REPLACE_WITH_SUPABASE_ANON_KEY';
+const DISCORD_CLIENT_ID='REPLACE_WITH_DISCORD_CLIENT_ID';
+const sb=supabase.createClient(SUPABASE_URL,SUPABASE_ANON_KEY,{global:{fetch:(url,options)=>fetch(url,{...options,cache:'no-store'})}});
+
+let session=null;   // {session_token}
+let account=null;
+let character=null;
+
+async function callFn(name,payload){
+  const res=await fetch(FUNCTIONS_URL+'/'+name,{
+    method:'POST',
+    headers:{'Content-Type':'application/json','Authorization':'Bearer '+SUPABASE_ANON_KEY,'apikey':SUPABASE_ANON_KEY},
+    body:JSON.stringify(payload||{})
+  });
+  return res.json();
+}
+
+// ── Discord entry ────────────────────────────────────────────────────────
+async function runDiscordEntry(){
+  const statusEl=document.getElementById('auth-status');
+  statusEl.classList.add('show');
+  try{
+    const {DiscordSDK}=window.DiscordSDKLib;
+    const discordSdk=new DiscordSDK(DISCORD_CLIENT_ID);
+    await withTimeout(discordSdk.ready(),20000,'Discord SDK ready()');
+    let code;
+    try{
+      ({code}=await discordSdk.commands.authorize({client_id:DISCORD_CLIENT_ID,response_type:'code',state:'',prompt:'none',scope:['identify']}));
+    }catch(e){
+      ({code}=await discordSdk.commands.authorize({client_id:DISCORD_CLIENT_ID,response_type:'code',state:'',prompt:'consent',scope:['identify']}));
+    }
+    const data=await callFn('discord-auth',{code});
+    if(!data.ok||!data.account)throw new Error(data.message||'Discord sign-in failed.');
+    localStorage.setItem('raided_hex_session',data.account.session_token);
+    boot(data.account,data.character);
+  }catch(e){
+    console.error('Discord entry failed:',e);
+    await tryRestoreSession();
+    if(!account)showDiscordConnectError(e);
+  }finally{
+    if(account)statusEl.classList.remove('show');
+  }
+}
+function showDiscordConnectError(e){
+  const msg=(e&&(e.message||e.toString()))||'Unknown error';
+  let debugEl=document.getElementById('auth-discord-debug');
+  if(!debugEl){
+    debugEl=document.createElement('div');
+    debugEl.id='auth-discord-debug';
+    document.getElementById('auth-status').insertAdjacentElement('afterend',debugEl);
+  }
+  debugEl.textContent='Debug: '+msg;
+}
+async function tryRestoreSession(){
+  const token=localStorage.getItem('raided_hex_session');
+  if(!token)return;
+  const data=await callFn('whoami',{session_token:token}).catch(e=>({ok:false,message:String(e)}));
+  if(!data.ok||!data.account){localStorage.removeItem('raided_hex_session');return;}
+  boot({...data.account,session_token:token},data.character);
+}
+async function bootDiscordDM(){
+  await tryRestoreSession();
+  if(!account)await runDiscordEntry();
+}
+
+// ── Screens ──────────────────────────────────────────────────────────────
+function boot(acct,char){
+  account=acct;
+  character=char;
+  session=acct.session_token;
+  if(character){showGameScreen();}else{showCreateScreen();}
+}
+
+const CLASSES=[
+  {id:'warrior',name:'Warrior',desc:'Frontline melee bruiser'},
+  {id:'mage',name:'Mage',desc:'Ranged arcane damage'},
+  {id:'rogue',name:'Rogue',desc:'High-agility burst striker'},
+  {id:'cleric',name:'Cleric',desc:'Durable support/damage hybrid'},
+  {id:'ranger',name:'Ranger',desc:'Consistent physical ranged damage'},
+];
+let selectedClass=null;
+
+function showCreateScreen(){
+  document.getElementById('screen-create').classList.add('show');
+  document.getElementById('screen-game').classList.remove('show');
+  const grid=document.getElementById('class-grid');
+  grid.innerHTML='';
+  CLASSES.forEach(c=>{
+    const card=document.createElement('div');
+    card.className='class-card';
+    card.innerHTML=`<b>${c.name}</b><span>${c.desc}</span>`;
+    card.onclick=()=>{selectedClass=c.id;[...grid.children].forEach(el=>el.classList.remove('selected'));card.classList.add('selected');validateCreateForm();};
+    grid.appendChild(card);
+  });
+}
+function validateCreateForm(){
+  const name=document.getElementById('char-name').value.trim();
+  document.getElementById('create-btn').disabled=!(name&&selectedClass);
+}
+document.getElementById('char-name').addEventListener('input',validateCreateForm);
+document.getElementById('create-btn').addEventListener('click',async()=>{
+  const name=document.getElementById('char-name').value.trim();
+  const errEl=document.getElementById('create-error');
+  errEl.textContent='';
+  const data=await callFn('create-character',{session_token:session,name,class:selectedClass});
+  if(!data.ok){errEl.textContent=data.message||'Could not create character.';return;}
+  character=data.character;
+  showGameScreen();
+});
+
+function showGameScreen(){
+  document.getElementById('screen-create').classList.remove('show');
+  document.getElementById('screen-game').classList.add('show');
+  renderCharSheet();
+}
+function renderCharSheet(){
+  const sheet=document.getElementById('char-sheet');
+  const deadBanner=document.getElementById('dead-banner');
+  const attackBtn=document.getElementById('attack-btn');
+  if(!character){sheet.innerHTML='';return;}
+  if(!character.alive){
+    deadBanner.style.display='block';
+    attackBtn.disabled=true;
+  }else{
+    deadBanner.style.display='none';
+    attackBtn.disabled=character.attacks_remaining_today<=0;
+  }
+  sheet.innerHTML=`
+    <div class="row"><b>${character.name}</b><span>Lv ${character.level} ${character.class}</span></div>
+    <div class="row"><span>Gold</span><span>${character.gold}</span></div>
+    <div class="row"><span>Attacks left today</span><span>${character.attacks_remaining_today}</span></div>
+  `;
+}
+document.getElementById('reroll-btn').addEventListener('click',()=>{character=null;showCreateScreen();});
+document.getElementById('attack-btn').addEventListener('click',async()=>{
+  const errEl=document.getElementById('attack-error');
+  const btn=document.getElementById('attack-btn');
+  errEl.textContent='';
+  btn.disabled=true;
+  const data=await callFn('attack-boss',{session_token:session});
+  btn.disabled=false;
+  if(!data.ok){errEl.textContent=data.message||'Attack failed.';return;}
+  character.attacks_remaining_today=data.attacks_remaining;
+  if(data.died)character.alive=false;
+  const log=document.getElementById('attack-log');
+  const entry=document.createElement('div');
+  entry.textContent=data.died
+    ? `You struck for ${data.damage} damage... and fell in the process.`
+    : `You struck for ${data.damage} damage. Boss total: ${data.total_damage_to_boss}.`;
+  log.prepend(entry);
+  renderCharSheet();
+});
+
+// ── Entry point ──────────────────────────────────────────────────────────
+if(isDiscordActivity()){
+  if(isDiscordDM()){bootDiscordDM();}else{runDiscordEntry();}
+}else{
+  tryRestoreSession();
+}
+</script>
+</body>
+</html>
