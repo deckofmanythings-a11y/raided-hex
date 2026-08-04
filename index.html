@@ -69,10 +69,10 @@ function isDiscordDM(){const loc=new URLSearchParams(location.search).get('locat
 function withTimeout(promise,ms,label){return Promise.race([promise,new Promise((_,reject)=>setTimeout(()=>reject(new Error(label+' timed out')),ms))]);}
 
 // TODO fill in after creating the Supabase project and Discord application (see README.md).
-const SUPABASE_URL=isDiscordActivity()?(location.origin+'/.proxy/supabase'):'REPLACE_WITH_SUPABASE_URL';
+const SUPABASE_URL=isDiscordActivity()?(location.origin+'/.proxy/supabase'):'https://uaoxvhihwiygrajicend.supabase.co';
 const FUNCTIONS_URL=SUPABASE_URL+'/functions/v1';
-const SUPABASE_ANON_KEY='REPLACE_WITH_SUPABASE_ANON_KEY';
-const DISCORD_CLIENT_ID='REPLACE_WITH_DISCORD_CLIENT_ID';
+const SUPABASE_ANON_KEY='sb_publishable_91Zn_uJ9anW46vAClx6-bQ__wLL4fXl';
+const DISCORD_CLIENT_ID='1534237310915182772';
 const sb=supabase.createClient(SUPABASE_URL,SUPABASE_ANON_KEY,{global:{fetch:(url,options)=>fetch(url,{...options,cache:'no-store'})}});
 
 let session=null;   // {session_token}
