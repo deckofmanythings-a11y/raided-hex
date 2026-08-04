@@ -102,7 +102,7 @@
 // Bumped on every push so it's obvious in-app whether you're looking at the
 // latest deployed build (GitHub Pages + Discord's Activity iframe can both cache
 // aggressively) -- shown as a small tag, bottom-right, on every screen.
-const APP_VERSION='0.0.1';
+const APP_VERSION='0.1.0';
 document.getElementById('version-tag').textContent='v'+APP_VERSION;
 
 // ── Config ───────────────────────────────────────────────────────────────
@@ -333,6 +333,13 @@ function computeDerivedStats(stats,gearBonus,level){
     crit_multiplier:1.5
   };
 }
+// Mirrors _shared/combat.ts::xpToNextLevel / computeLevelUp exactly.
+function xpToNextLevel(level){return 100*level;}
+function computeLevelUp(currentXp,currentLevel,xpGained){
+  let xp=currentXp+xpGained,level=currentLevel,levelsGained=0;
+  while(xp>=xpToNextLevel(level)){xp-=xpToNextLevel(level);level+=1;levelsGained+=1;}
+  return{xp,level,levelsGained};
+}
 function gearBonusFromEquipped(){
   const bonus={};
   inventory.filter(r=>r.equipped_slot).forEach(r=>{
@@ -371,8 +378,10 @@ function renderCharSheet(){
   const stats=computeDerivedStats(character.stats,gearBonusFromEquipped(),character.level);
   const maxWounds=effectiveMaxWounds();
   const wounds='☠️'.repeat(character.mortal_wounds)+'○'.repeat(Math.max(0,maxWounds-character.mortal_wounds));
+  const xpNeeded=xpToNextLevel(character.level);
   sheet.innerHTML=`
     <div class="row"><b>${character.name}</b><span>Lv ${character.level} ${character.class}</span></div>
+    <div class="row"><span>XP</span><span>${character.xp} / ${xpNeeded}</span></div>
     <div class="stat-grid">
       <div class="row"><span>Max HP</span><span>${stats.max_hp}</span></div>
       <div class="row"><span>Attack</span><span>${stats.attack_power}</span></div>
@@ -422,6 +431,8 @@ document.getElementById('attack-btn').addEventListener('click',async()=>{
   character.attempts_remaining_today=data.attempts_remaining;
   character.mortal_wounds=(character.mortal_wounds||0)+(data.mortal_wound.landed?1:0);
   if(data.permadeath)character.alive=false;
+  const lvl=computeLevelUp(character.xp,character.level,data.xp_gained);
+  character.xp=lvl.xp;character.level=lvl.level;
 
   const log=document.getElementById('attack-log');
   const fightBlock=document.createElement('div');
@@ -440,6 +451,14 @@ document.getElementById('attack-btn').addEventListener('click',async()=>{
     const el=document.createElement('div');
     el.className=data.permadeath?'permadeath-line':'mortal-wound-line';
     el.textContent=data.permadeath?'Your character has succumbed to their wounds. Permadeath.':'You suffered a Mortal Wound.';
+    fightBlock.appendChild(el);
+  }
+
+  if(data.levels_gained>0){
+    const el=document.createElement('div');
+    el.className='fight-summary';
+    el.style.color='#ffd27a';
+    el.textContent=`⭐ Reached level ${data.new_level}!`;
     fightBlock.appendChild(el);
   }
 
