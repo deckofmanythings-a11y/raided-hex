@@ -118,7 +118,7 @@
 // Bumped on every push so it's obvious in-app whether you're looking at the
 // latest deployed build (GitHub Pages + Discord's Activity iframe can both cache
 // aggressively) -- shown as a small tag, bottom-right, on every screen.
-const APP_VERSION='0.3.0';
+const APP_VERSION='0.4.0';
 document.getElementById('version-tag').textContent='v'+APP_VERSION;
 
 // ── Config ───────────────────────────────────────────────────────────────
@@ -351,6 +351,7 @@ function formatEffects(effects){
   const badges=[];
   if(effects.prevents_mortal_wound)badges.push('Prevents a Mortal Wound (breaks)');
   if(effects.mortal_wound_capacity)badges.push(`+${effects.mortal_wound_capacity} Mortal Wound capacity`);
+  if(effects.ability)badges.push(`⚔️ ${effects.ability.name}: ${effects.ability.description}`);
   return badges.map(b=>`<span class="effect-badge">${b}</span>`).join('');
 }
 function renderInventory(){
@@ -551,7 +552,10 @@ function renderRounds(rounds){
   const roundLine=r=>{
     const el=document.createElement('div');
     el.className='round-line'+(r.crit?' crit':'');
-    el.textContent=`R${r.round}: you hit for ${r.player_damage}${r.crit?' (crit!)':''}, boss hits back for ${r.boss_damage_taken} (HP ${r.hp_remaining})`;
+    let text=`R${r.round}: you hit for ${r.player_damage}${r.crit?' (crit!)':''}, boss hits back for ${r.boss_damage_taken} (HP ${r.hp_remaining})`;
+    if(r.procs&&r.procs.length)text+=`\n   ✨ ${r.procs.join(' | ')}`;
+    el.style.whiteSpace='pre-line';
+    el.textContent=text;
     return el;
   };
   const shown=rounds.length<=6?rounds:[...rounds.slice(0,2),null,...rounds.slice(-2)];
@@ -560,7 +564,9 @@ function renderRounds(rounds){
       const el=document.createElement('div');
       el.className='round-line';
       el.style.opacity='.5';
-      el.textContent=`(${rounds.length-4} more rounds...)`;
+      el.style.whiteSpace='pre-line';
+      const elidedProcs=rounds.slice(2,-2).flatMap(x=>x.procs||[]);
+      el.textContent=`(${rounds.length-4} more rounds...)`+(elidedProcs.length?`\n   ✨ ${elidedProcs.join(' | ')}`:'');
       frag.appendChild(el);
     }else{
       frag.appendChild(roundLine(r));
@@ -613,7 +619,10 @@ document.getElementById('attack-btn').addEventListener('click',async()=>{
   (data.items_dropped||[]).forEach(it=>{
     const lootEntry=document.createElement('div');
     lootEntry.className='loot-drop';
-    lootEntry.textContent=`Loot! ${it.rarity} ${it.name} (${formatStats(it.rolled_stats)})`;
+    let text=`Loot! ${it.rarity} ${it.name} (${formatStats(it.rolled_stats)})`;
+    if(it.ability)text+=`\n   ⚔️ ${it.ability.name}: ${it.ability.description}`;
+    lootEntry.style.whiteSpace='pre-line';
+    lootEntry.textContent=text;
     fightBlock.appendChild(lootEntry);
   });
 
