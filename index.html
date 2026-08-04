@@ -48,6 +48,16 @@
   .store-item{display:flex;justify-content:space-between;align-items:center;border:1px solid #3a2d4d;border-radius:6px;padding:8px;margin-bottom:6px;font-size:13px;}
   .store-item .buy-btn{margin:0;width:auto;padding:5px 10px;font-size:12px;}
   .store-price{opacity:.7;font-size:11px;}
+  .stat-grid{display:grid;grid-template-columns:1fr 1fr;gap:2px 12px;margin:8px 0;}
+  .stat-grid .row{display:flex;justify-content:space-between;font-size:12px;padding:2px 0;}
+  .stat-grid .row span:first-child{opacity:.65;}
+  .wounds{letter-spacing:2px;font-size:15px;}
+  .effect-badge{display:inline-block;font-size:10px;padding:1px 6px;border-radius:10px;margin-top:3px;background:#3a2d4d;color:#ffd27a;}
+  .round-line{font-size:12px;opacity:.85;padding:2px 0;}
+  .round-line.crit{color:#ffd27a;}
+  .fight-summary{font-weight:600;margin-top:4px;}
+  .mortal-wound-line{color:#ff6b81;font-weight:600;}
+  .permadeath-line{color:#ff2d4d;font-weight:700;}
 </style>
 </head>
 <body>
@@ -220,7 +230,7 @@ function showGameScreen(){
 let storeListings=[];
 async function loadStore(){
   const{data,error}=await sb.from('auction_listings')
-    .select('id, price, items(id, name, slot, rarity, rolled_stats, class_restriction)')
+    .select('id, price, items(id, name, slot, rarity, rolled_stats, effects, class_restriction)')
     .is('seller_character_id',null)
     .is('sold_at',null)
     .order('price',{ascending:true});
@@ -236,7 +246,7 @@ function renderStore(){
     const restricted=it.class_restriction&&it.class_restriction!==character.class;
     const tooExpensive=character.gold<listing.price;
     return `<div class="store-item">
-      <div><span class="rarity-${it.rarity}">${it.name}</span><br><span style="opacity:.6;font-size:11px;">${formatStats(it.rolled_stats)}</span><br><span class="store-price">${listing.price} gold</span></div>
+      <div><span class="rarity-${it.rarity}">${it.name}</span><br><span style="opacity:.6;font-size:11px;">${formatStats(it.rolled_stats)}</span>${formatEffects(it.effects)}<br><span class="store-price">${listing.price} gold</span></div>
       <button class="buy-btn" data-buy="${listing.id}" ${restricted||tooExpensive?'disabled':''} title="${restricted?'Wrong class':tooExpensive?'Not enough gold':''}">Buy</button>
     </div>`;
   }).join('');
@@ -257,21 +267,29 @@ let inventory=[]; // rows: {id, equipped_slot, items:{id,name,slot,rarity,rolled
 async function loadInventory(){
   if(!character)return;
   const{data,error}=await sb.from('character_inventory')
-    .select('id, equipped_slot, items(id, name, slot, rarity, rolled_stats, class_restriction)')
+    .select('id, equipped_slot, items(id, name, slot, rarity, rolled_stats, effects, class_restriction)')
     .eq('character_id',character.id);
   if(error){console.error('loadInventory failed',error);return;}
   inventory=data||[];
   renderInventory();
+  renderCharSheet();
 }
 function formatStats(stats){
   if(!stats)return'';
   return Object.entries(stats).map(([k,v])=>`${k.toUpperCase()} +${v}`).join(' · ');
 }
+function formatEffects(effects){
+  if(!effects)return'';
+  const badges=[];
+  if(effects.prevents_mortal_wound)badges.push('Prevents a Mortal Wound (breaks)');
+  if(effects.mortal_wound_capacity)badges.push(`+${effects.mortal_wound_capacity} Mortal Wound capacity`);
+  return badges.map(b=>`<span class="effect-badge">${b}</span>`).join('');
+}
 function renderInventory(){
   const equipGrid=document.getElementById('equip-grid');
   equipGrid.innerHTML=EQUIP_SLOTS.map(slot=>{
     const row=inventory.find(r=>r.equipped_slot===slot);
-    return `<div class="equip-slot"><span class="slot-name">${slot}</span>${row?`<span class="item-name rarity-${row.items.rarity}">${row.items.name}</span>`:'<span class="item-name" style="opacity:.4">Empty</span>'}</div>`;
+    return `<div class="equip-slot"><span class="slot-name">${slot}</span>${row?`<span class="item-name rarity-${row.items.rarity}">${row.items.name}</span>${formatEffects(row.items.effects)}`:'<span class="item-name" style="opacity:.4">Empty</span>'}</div>`;
   }).join('');
 
   const bagList=document.getElementById('bag-list');
@@ -281,7 +299,7 @@ function renderInventory(){
     const it=row.items;
     const restricted=it.class_restriction&&it.class_restriction!==character.class;
     return `<div class="bag-item">
-      <div><span class="rarity-${it.rarity}">${it.name}</span><br><span style="opacity:.6;font-size:11px;">${formatStats(it.rolled_stats)}</span></div>
+      <div><span class="rarity-${it.rarity}">${it.name}</span><br><span style="opacity:.6;font-size:11px;">${formatStats(it.rolled_stats)}</span>${formatEffects(it.effects)}</div>
       <div class="actions">
         <button data-eq="${row.id}" ${restricted?'disabled title="Wrong class"':''}>Equip</button>
         <button class="sell-btn" data-sell="${row.id}">Sell</button>
@@ -290,6 +308,32 @@ function renderInventory(){
   }).join('');
   bagList.querySelectorAll('[data-eq]').forEach(btn=>btn.addEventListener('click',()=>equipItem(btn.dataset.eq)));
   bagList.querySelectorAll('[data-sell]').forEach(btn=>btn.addEventListener('click',()=>sellItem(btn.dataset.sell)));
+}
+// Mirrors _shared/combat.ts::computeDerivedStats exactly -- display-only here, the
+// server is the sole authority on what these values actually do in combat.
+function computeDerivedStats(stats,gearBonus,level){
+  const str=(stats.str||0)+(gearBonus.str||0);
+  const agi=(stats.agi||0)+(gearBonus.agi||0);
+  const intl=(stats.int||0)+(gearBonus.int||0);
+  const vit=(stats.vit||0)+(gearBonus.vit||0);
+  return{
+    max_hp:Math.round(50+vit*8+level*10),
+    attack_power:Math.round(str+agi*0.5+intl*0.5+level*2),
+    defense:Math.round(vit*1.5+agi*0.5),
+    crit_chance:Math.min(0.5,Math.max(0,0.05+agi*0.003)),
+    crit_multiplier:1.5
+  };
+}
+function gearBonusFromEquipped(){
+  const bonus={};
+  inventory.filter(r=>r.equipped_slot).forEach(r=>{
+    const s=r.items.rolled_stats||{};
+    for(const[k,v]of Object.entries(s))bonus[k]=(bonus[k]||0)+v;
+  });
+  return bonus;
+}
+function effectiveMaxWounds(){
+  return 3+inventory.reduce((sum,r)=>sum+(r.items.effects?.mortal_wound_capacity||0),0);
 }
 async function equipItem(inventoryId){
   const data=await callFn('equip-item',{session_token:session,inventory_id:inventoryId});
@@ -313,15 +357,51 @@ function renderCharSheet(){
     attackBtn.disabled=true;
   }else{
     deadBanner.style.display='none';
-    attackBtn.disabled=character.attacks_remaining_today<=0;
+    attackBtn.disabled=character.attempts_remaining_today<=0;
   }
+  const stats=computeDerivedStats(character.stats,gearBonusFromEquipped(),character.level);
+  const maxWounds=effectiveMaxWounds();
+  const wounds='☠️'.repeat(character.mortal_wounds)+'○'.repeat(Math.max(0,maxWounds-character.mortal_wounds));
   sheet.innerHTML=`
     <div class="row"><b>${character.name}</b><span>Lv ${character.level} ${character.class}</span></div>
+    <div class="stat-grid">
+      <div class="row"><span>Max HP</span><span>${stats.max_hp}</span></div>
+      <div class="row"><span>Attack</span><span>${stats.attack_power}</span></div>
+      <div class="row"><span>Defense</span><span>${stats.defense}</span></div>
+      <div class="row"><span>Crit Chance</span><span>${Math.round(stats.crit_chance*100)}%</span></div>
+      <div class="row"><span>Crit Damage</span><span>${stats.crit_multiplier}x</span></div>
+      <div class="row"><span>Attempts left</span><span>${character.attempts_remaining_today}</span></div>
+    </div>
     <div class="row"><span>Gold</span><span>${character.gold}</span></div>
-    <div class="row"><span>Attacks left today</span><span>${character.attacks_remaining_today}</span></div>
+    <div class="row"><span>Mortal Wounds</span><span class="wounds">${wounds}</span></div>
   `;
 }
 document.getElementById('reroll-btn').addEventListener('click',()=>{character=null;showCreateScreen();});
+// A long fight (dozens of rounds) shows the opening, the final (fatal) round, and a
+// count of what happened in between -- matches the condensed format used in the
+// Discord slash command reply (discord-interactions/index.ts::formatRounds).
+function renderRounds(rounds){
+  const frag=document.createDocumentFragment();
+  const roundLine=r=>{
+    const el=document.createElement('div');
+    el.className='round-line'+(r.crit?' crit':'');
+    el.textContent=`R${r.round}: you hit for ${r.player_damage}${r.crit?' (crit!)':''}, boss hits back for ${r.boss_damage_taken} (HP ${r.hp_remaining})`;
+    return el;
+  };
+  const shown=rounds.length<=6?rounds:[...rounds.slice(0,2),null,...rounds.slice(-2)];
+  shown.forEach(r=>{
+    if(r===null){
+      const el=document.createElement('div');
+      el.className='round-line';
+      el.style.opacity='.5';
+      el.textContent=`(${rounds.length-4} more rounds...)`;
+      frag.appendChild(el);
+    }else{
+      frag.appendChild(roundLine(r));
+    }
+  });
+  return frag;
+}
 document.getElementById('attack-btn').addEventListener('click',async()=>{
   const errEl=document.getElementById('attack-error');
   const btn=document.getElementById('attack-btn');
@@ -330,22 +410,40 @@ document.getElementById('attack-btn').addEventListener('click',async()=>{
   const data=await callFn('attack-boss',{session_token:session});
   btn.disabled=false;
   if(!data.ok){errEl.textContent=data.message||'Attack failed.';return;}
-  character.attacks_remaining_today=data.attacks_remaining;
-  if(data.died)character.alive=false;
+  character.attempts_remaining_today=data.attempts_remaining;
+  character.mortal_wounds=(character.mortal_wounds||0)+(data.mortal_wound.landed?1:0);
+  if(data.permadeath)character.alive=false;
+
   const log=document.getElementById('attack-log');
-  const entry=document.createElement('div');
-  entry.textContent=data.died
-    ? `You struck for ${data.damage} damage... and fell in the process.`
-    : `You struck for ${data.damage} damage. Boss total: ${data.total_damage_to_boss}.`;
-  log.prepend(entry);
+  const fightBlock=document.createElement('div');
+  fightBlock.appendChild(renderRounds(data.rounds));
+  const summary=document.createElement('div');
+  summary.className='fight-summary';
+  summary.textContent=`Defeated after ${data.rounds.length} round${data.rounds.length===1?'':'s'} — dealt ${data.total_damage_to_boss} damage. Boss total: ${data.total_damage_all_time}.`;
+  fightBlock.appendChild(summary);
+
+  if(data.mortal_wound.prevented_by_item){
+    const el=document.createElement('div');
+    el.className='mortal-wound-line';
+    el.textContent=`A Mortal Wound would have landed, but ${data.mortal_wound.prevented_by_item} shattered to protect you.`;
+    fightBlock.appendChild(el);
+  }else if(data.mortal_wound.landed){
+    const el=document.createElement('div');
+    el.className=data.permadeath?'permadeath-line':'mortal-wound-line';
+    el.textContent=data.permadeath?'Your character has succumbed to their wounds. Permadeath.':'You suffered a Mortal Wound.';
+    fightBlock.appendChild(el);
+  }
+
   (data.items_dropped||[]).forEach(it=>{
     const lootEntry=document.createElement('div');
     lootEntry.className='loot-drop';
     lootEntry.textContent=`Loot! ${it.rarity} ${it.name} (${formatStats(it.rolled_stats)})`;
-    log.prepend(lootEntry);
+    fightBlock.appendChild(lootEntry);
   });
+
+  log.prepend(fightBlock);
   renderCharSheet();
-  if((data.items_dropped||[]).length)await loadInventory();
+  await loadInventory();
 });
 
 // ── Entry point ──────────────────────────────────────────────────────────
