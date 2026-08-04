@@ -30,6 +30,21 @@
   #attack-log div{padding:6px 0;border-bottom:1px solid #33254a;}
   .dead-banner{background:#4a1622;border:1px solid #7a2a3d;border-radius:8px;padding:14px;text-align:center;margin-bottom:14px;}
   .error-msg{color:#ff8a9a;font-size:13px;margin-top:8px;min-height:16px;}
+  .section-title{font-size:14px;margin:18px 0 8px;opacity:.85;}
+  .equip-grid{display:grid;grid-template-columns:1fr 1fr;gap:6px;}
+  .equip-slot{border:1px solid #3a2d4d;border-radius:6px;padding:6px 8px;font-size:12px;background:#1c1526;}
+  .equip-slot .slot-name{opacity:.6;text-transform:capitalize;}
+  .equip-slot .item-name{display:block;margin-top:2px;}
+  .rarity-common{color:#c9c2d6;}
+  .rarity-uncommon{color:#7fd992;}
+  .rarity-rare{color:#7fb8ff;}
+  .rarity-epic{color:#c98fff;}
+  .rarity-legendary{color:#ffb347;}
+  .bag-item{display:flex;justify-content:space-between;align-items:center;border:1px solid #3a2d4d;border-radius:6px;padding:8px;margin-bottom:6px;font-size:13px;}
+  .bag-item .actions{display:flex;gap:6px;}
+  .bag-item button{margin:0;width:auto;padding:5px 10px;font-size:12px;}
+  .bag-item .sell-btn{background:#4a3560;}
+  .loot-drop{color:#ffd27a;}
 </style>
 </head>
 <body>
@@ -56,6 +71,12 @@
   <button id="attack-btn">Attack</button>
   <div class="error-msg" id="attack-error"></div>
   <div id="attack-log"></div>
+
+  <div class="section-title">Equipped</div>
+  <div class="equip-grid" id="equip-grid"></div>
+
+  <div class="section-title">Bag</div>
+  <div id="bag-list"></div>
 </div>
 
 <script>
@@ -185,6 +206,61 @@ function showGameScreen(){
   document.getElementById('screen-create').classList.remove('show');
   document.getElementById('screen-game').classList.add('show');
   renderCharSheet();
+  loadInventory();
+}
+
+// ── Inventory ────────────────────────────────────────────────────────────
+const EQUIP_SLOTS=['weapon','head','chest','hands','legs','feet','trinket'];
+let inventory=[]; // rows: {id, equipped_slot, items:{id,name,slot,rarity,rolled_stats,class_restriction}}
+
+async function loadInventory(){
+  if(!character)return;
+  const{data,error}=await sb.from('character_inventory')
+    .select('id, equipped_slot, items(id, name, slot, rarity, rolled_stats, class_restriction)')
+    .eq('character_id',character.id);
+  if(error){console.error('loadInventory failed',error);return;}
+  inventory=data||[];
+  renderInventory();
+}
+function formatStats(stats){
+  if(!stats)return'';
+  return Object.entries(stats).map(([k,v])=>`${k.toUpperCase()} +${v}`).join(' · ');
+}
+function renderInventory(){
+  const equipGrid=document.getElementById('equip-grid');
+  equipGrid.innerHTML=EQUIP_SLOTS.map(slot=>{
+    const row=inventory.find(r=>r.equipped_slot===slot);
+    return `<div class="equip-slot"><span class="slot-name">${slot}</span>${row?`<span class="item-name rarity-${row.items.rarity}">${row.items.name}</span>`:'<span class="item-name" style="opacity:.4">Empty</span>'}</div>`;
+  }).join('');
+
+  const bagList=document.getElementById('bag-list');
+  const bagRows=inventory.filter(r=>!r.equipped_slot);
+  if(bagRows.length===0){bagList.innerHTML='<div style="font-size:12px;opacity:.5;">Nothing in your bag yet.</div>';return;}
+  bagList.innerHTML=bagRows.map(row=>{
+    const it=row.items;
+    const restricted=it.class_restriction&&it.class_restriction!==character.class;
+    return `<div class="bag-item">
+      <div><span class="rarity-${it.rarity}">${it.name}</span><br><span style="opacity:.6;font-size:11px;">${formatStats(it.rolled_stats)}</span></div>
+      <div class="actions">
+        <button data-eq="${row.id}" ${restricted?'disabled title="Wrong class"':''}>Equip</button>
+        <button class="sell-btn" data-sell="${row.id}">Sell</button>
+      </div>
+    </div>`;
+  }).join('');
+  bagList.querySelectorAll('[data-eq]').forEach(btn=>btn.addEventListener('click',()=>equipItem(btn.dataset.eq)));
+  bagList.querySelectorAll('[data-sell]').forEach(btn=>btn.addEventListener('click',()=>sellItem(btn.dataset.sell)));
+}
+async function equipItem(inventoryId){
+  const data=await callFn('equip-item',{session_token:session,inventory_id:inventoryId});
+  if(!data.ok){alert(data.message||'Equip failed.');return;}
+  await loadInventory();
+}
+async function sellItem(inventoryId){
+  const data=await callFn('sell-item',{session_token:session,inventory_id:inventoryId});
+  if(!data.ok){alert(data.message||'Sell failed.');return;}
+  character.gold=data.new_gold_total;
+  renderCharSheet();
+  await loadInventory();
 }
 function renderCharSheet(){
   const sheet=document.getElementById('char-sheet');
@@ -221,7 +297,14 @@ document.getElementById('attack-btn').addEventListener('click',async()=>{
     ? `You struck for ${data.damage} damage... and fell in the process.`
     : `You struck for ${data.damage} damage. Boss total: ${data.total_damage_to_boss}.`;
   log.prepend(entry);
+  (data.items_dropped||[]).forEach(it=>{
+    const lootEntry=document.createElement('div');
+    lootEntry.className='loot-drop';
+    lootEntry.textContent=`Loot! ${it.rarity} ${it.name} (${formatStats(it.rolled_stats)})`;
+    log.prepend(lootEntry);
+  });
   renderCharSheet();
+  if((data.items_dropped||[]).length)await loadInventory();
 });
 
 // ── Entry point ──────────────────────────────────────────────────────────
