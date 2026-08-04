@@ -62,6 +62,14 @@
   .mausoleum-entry{border:1px solid #3a2d4d;border-radius:6px;padding:8px 10px;margin-bottom:6px;font-size:12px;background:#181220;}
   .mausoleum-entry .epitaph{font-style:italic;opacity:.55;font-size:11px;margin-top:2px;}
   .mausoleum-entry b{color:#c9c2d6;}
+  #crunch-toggle{margin:10px 0 0;width:auto;padding:6px 12px;font-size:12px;background:#33254a;}
+  #crunch-panel{display:none;margin-top:10px;padding:12px;border:1px solid #3a2d4d;border-radius:8px;background:#120e1a;font-family:monospace;font-size:11px;line-height:1.7;overflow-x:auto;}
+  #crunch-panel.show{display:block;}
+  #crunch-panel h4{margin:12px 0 4px;font-size:11px;text-transform:uppercase;letter-spacing:1px;opacity:.6;font-family:system-ui,sans-serif;}
+  #crunch-panel h4:first-child{margin-top:0;}
+  #crunch-panel .formula{opacity:.6;}
+  #crunch-panel .result{color:#ffd27a;}
+  #crunch-panel .crunch-row{white-space:pre;}
 </style>
 </head>
 <body>
@@ -85,6 +93,8 @@
     Your character has fallen. <button id="reroll-btn" style="width:auto;padding:6px 14px;">Create a new character</button>
   </div>
   <div id="char-sheet"></div>
+  <button id="crunch-toggle">🔬 Show the math</button>
+  <div id="crunch-panel"></div>
   <div id="boss-info" style="margin-top:14px;font-size:14px;"></div>
   <button id="attack-btn">Attack</button>
   <div class="error-msg" id="attack-error"></div>
@@ -108,7 +118,7 @@
 // Bumped on every push so it's obvious in-app whether you're looking at the
 // latest deployed build (GitHub Pages + Discord's Activity iframe can both cache
 // aggressively) -- shown as a small tag, bottom-right, on every screen.
-const APP_VERSION='0.2.0';
+const APP_VERSION='0.3.0';
 document.getElementById('version-tag').textContent='v'+APP_VERSION;
 
 // ── Config ───────────────────────────────────────────────────────────────
@@ -240,6 +250,22 @@ function showGameScreen(){
   loadInventory();
   loadStore();
   loadMausoleum();
+  loadActiveBoss();
+}
+
+// ── Active boss (needed for the crunch panel's live matchup numbers) ──────
+let activeBoss=null;
+let currentBossDamage=0;
+async function loadActiveBoss(){
+  const{data:boss}=await sb.from('bosses').select('*').eq('active',true).maybeSingle();
+  activeBoss=boss||null;
+  if(character&&activeBoss){
+    const{data:dmg}=await sb.from('boss_damage').select('damage_dealt').eq('character_id',character.id).eq('boss_id',activeBoss.id).maybeSingle();
+    currentBossDamage=dmg?.damage_dealt||0;
+  }else{
+    currentBossDamage=0;
+  }
+  renderCrunchPanel();
 }
 
 // ── Mausoleum: memorial for permadeath'd characters ────────────────────────
@@ -308,6 +334,7 @@ async function loadInventory(){
   inventory=data||[];
   renderInventory();
   renderCharSheet();
+  renderCrunchPanel();
 }
 function formatStats(stats){
   if(!stats)return'';
@@ -382,6 +409,95 @@ function gearBonusFromEquipped(){
 }
 function effectiveMaxWounds(){
   return 3+inventory.reduce((sum,r)=>sum+(r.items.effects?.mortal_wound_capacity||0),0);
+}
+
+// ── The crunch panel: every formula, spelled out with real numbers ────────
+// Mirrors _shared/combat.ts exactly -- MITIGATION_K, THRESHOLD_MULTIPLIERS,
+// THRESHOLD_DIFFICULTY_CAP, and the mortal-wound-chance formula all match the
+// server's constants. Display-only: the server remains sole authority on outcomes.
+const MITIGATION_K=50;
+const THRESHOLD_MULTIPLIERS=[100,400,1000,2500];
+const THRESHOLD_DIFFICULTY_CAP=5;
+function mitigationPct(defense){return defense/(defense+MITIGATION_K);}
+function fmtPct(x){return(x*100).toFixed(1)+'%';}
+
+document.getElementById('crunch-toggle').addEventListener('click',()=>{
+  document.getElementById('crunch-panel').classList.toggle('show');
+});
+
+function renderCrunchPanel(){
+  const panel=document.getElementById('crunch-panel');
+  if(!character){panel.innerHTML='';return;}
+  const base=character.stats||{};
+  const gear=gearBonusFromEquipped();
+  const str=(base.str||0)+(gear.str||0), agi=(base.agi||0)+(gear.agi||0), intl=(base.int||0)+(gear.int||0), vit=(base.vit||0)+(gear.vit||0);
+  const stats=computeDerivedStats(base,gear,character.level);
+
+  let html='';
+  html+=`<h4>Raw Stats (base + gear)</h4>`;
+  html+=`<div class="crunch-row">STR  ${base.str||0} + ${gear.str||0} = <span class="result">${str}</span></div>`;
+  html+=`<div class="crunch-row">AGI  ${base.agi||0} + ${gear.agi||0} = <span class="result">${agi}</span></div>`;
+  html+=`<div class="crunch-row">INT  ${base.int||0} + ${gear.int||0} = <span class="result">${intl}</span></div>`;
+  html+=`<div class="crunch-row">VIT  ${base.vit||0} + ${gear.vit||0} = <span class="result">${vit}</span></div>`;
+
+  html+=`<h4>Derived Stats</h4>`;
+  html+=`<div class="crunch-row"><span class="formula">Max HP = 50 + VIT*8 + Lv*10</span></div>`;
+  html+=`<div class="crunch-row">      = 50 + ${vit}*8 + ${character.level}*10 = <span class="result">${stats.max_hp}</span></div>`;
+  html+=`<div class="crunch-row"><span class="formula">Attack = STR + AGI*0.5 + INT*0.5 + Lv*2</span></div>`;
+  html+=`<div class="crunch-row">      = ${str} + ${agi}*0.5 + ${intl}*0.5 + ${character.level}*2 = <span class="result">${stats.attack_power}</span></div>`;
+  html+=`<div class="crunch-row"><span class="formula">Defense = VIT*1.5 + AGI*0.5</span></div>`;
+  html+=`<div class="crunch-row">      = ${vit}*1.5 + ${agi}*0.5 = <span class="result">${stats.defense}</span></div>`;
+  html+=`<div class="crunch-row"><span class="formula">Crit % = clamp(5% + AGI*0.3%, 0%, 50%)</span></div>`;
+  html+=`<div class="crunch-row">      = clamp(5% + ${agi}*0.3%, ...) = <span class="result">${fmtPct(stats.crit_chance)}</span></div>`;
+  html+=`<div class="crunch-row">Crit Damage = <span class="result">1.5x</span> (flat, v1)</div>`;
+
+  html+=`<h4>Damage Mitigation</h4>`;
+  html+=`<div class="crunch-row"><span class="formula">mitigation = defense / (defense + ${MITIGATION_K})</span></div>`;
+  html+=`<div class="crunch-row">Your effective hit vs a defense-D boss:</div>`;
+  html+=`<div class="crunch-row">   dmg = Attack * (1 - D/(D+${MITIGATION_K})) * variance(0.85-1.15)</div>`;
+
+  if(activeBoss){
+    const bossAttack=activeBoss.difficulty*12;
+    const bossDefense=activeBoss.difficulty*4;
+    const yourMit=mitigationPct(bossDefense);
+    const theirMit=mitigationPct(stats.defense);
+    const typicalHit=Math.round(stats.attack_power*(1-yourMit));
+    const typicalTaken=Math.round(bossAttack*(1-theirMit));
+    const cappedTaken=Math.min(Math.round(stats.max_hp*0.5),typicalTaken);
+    const targetPower=activeBoss.difficulty*15;
+    const underlevelRatio=Math.min(1,Math.max(0,(targetPower-stats.attack_power)/targetPower));
+    const mwChance=Math.min(0.35,Math.max(0.01,0.01+underlevelRatio*0.30));
+    const thresholds=THRESHOLD_MULTIPLIERS.map(m=>m*Math.min(activeBoss.difficulty,THRESHOLD_DIFFICULTY_CAP));
+
+    html+=`<h4>Current Matchup — ${activeBoss.name} (Difficulty ${activeBoss.difficulty})</h4>`;
+    html+=`<div class="crunch-row">Boss Attack  = Diff*12 = <span class="result">${bossAttack}</span></div>`;
+    html+=`<div class="crunch-row">Boss Defense = Diff*4  = <span class="result">${bossDefense}</span></div>`;
+    html+=`<div class="crunch-row">Your mitigation on boss = ${bossDefense}/(${bossDefense}+${MITIGATION_K}) = <span class="result">${fmtPct(yourMit)}</span></div>`;
+    html+=`<div class="crunch-row">  -> typical hit dealt ≈ <span class="result">${typicalHit}</span></div>`;
+    html+=`<div class="crunch-row">Boss mitigation from your Defense = ${stats.defense}/(${stats.defense}+${MITIGATION_K}) = <span class="result">${fmtPct(theirMit)}</span></div>`;
+    html+=`<div class="crunch-row">  -> typical hit taken ≈ ${typicalTaken}, capped at 50% Max HP = <span class="result">${cappedTaken}</span></div>`;
+
+    html+=`<h4>Mortal Wound Risk</h4>`;
+    html+=`<div class="crunch-row">Target Power = Diff*15 = <span class="result">${targetPower}</span></div>`;
+    html+=`<div class="crunch-row">Underlevel Ratio = clamp((Target-Attack)/Target, 0, 1) = <span class="result">${underlevelRatio.toFixed(3)}</span></div>`;
+    html+=`<div class="crunch-row">Mortal Wound % = clamp(1% + Ratio*30%, 1%, 35%) = <span class="result">${fmtPct(mwChance)}</span></div>`;
+
+    html+=`<h4>Loot Thresholds (capped at Diff ${Math.min(activeBoss.difficulty,THRESHOLD_DIFFICULTY_CAP)})</h4>`;
+    html+=`<div class="crunch-row">Your cumulative damage: <span class="result">${currentBossDamage}</span></div>`;
+    thresholds.forEach((t,i)=>{
+      const hit=currentBossDamage>=t;
+      html+=`<div class="crunch-row">  Tier ${i+1}: ${t} ${hit?'✓ claimed':'('+Math.max(0,t-currentBossDamage)+' to go)'}</div>`;
+    });
+  }else{
+    html+=`<h4>Current Matchup</h4><div class="crunch-row">No active boss right now.</div>`;
+  }
+
+  html+=`<h4>Progression</h4>`;
+  html+=`<div class="crunch-row">XP = ${character.xp} / ${xpToNextLevel(character.level)} to level ${character.level+1}</div>`;
+  html+=`<div class="crunch-row">XP formula: 1 XP per 1 damage dealt, per fight</div>`;
+  html+=`<div class="crunch-row">Mortal Wounds: ${character.mortal_wounds} / ${effectiveMaxWounds()} (permadeath at cap)</div>`;
+
+  panel.innerHTML=html;
 }
 async function equipItem(inventoryId){
   const data=await callFn('equip-item',{session_token:session,inventory_id:inventoryId});
@@ -504,7 +620,7 @@ document.getElementById('attack-btn').addEventListener('click',async()=>{
   log.appendChild(fightBlock);
   requestAnimationFrame(()=>{requestAnimationFrame(()=>{log.scrollTop=log.scrollHeight;});});
   renderCharSheet();
-  await loadInventory();
+  await Promise.all([loadInventory(),loadActiveBoss()]);
 });
 
 // ── Entry point ──────────────────────────────────────────────────────────
