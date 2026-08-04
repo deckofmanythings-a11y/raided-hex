@@ -45,6 +45,9 @@
   .bag-item button{margin:0;width:auto;padding:5px 10px;font-size:12px;}
   .bag-item .sell-btn{background:#4a3560;}
   .loot-drop{color:#ffd27a;}
+  .store-item{display:flex;justify-content:space-between;align-items:center;border:1px solid #3a2d4d;border-radius:6px;padding:8px;margin-bottom:6px;font-size:13px;}
+  .store-item .buy-btn{margin:0;width:auto;padding:5px 10px;font-size:12px;}
+  .store-price{opacity:.7;font-size:11px;}
 </style>
 </head>
 <body>
@@ -77,6 +80,9 @@
 
   <div class="section-title">Bag</div>
   <div id="bag-list"></div>
+
+  <div class="section-title">Auction House (today's stock)</div>
+  <div id="store-list"></div>
 </div>
 
 <script>
@@ -207,6 +213,41 @@ function showGameScreen(){
   document.getElementById('screen-game').classList.add('show');
   renderCharSheet();
   loadInventory();
+  loadStore();
+}
+
+// ── Auction house (daily system store, not player trading) ────────────────
+let storeListings=[];
+async function loadStore(){
+  const{data,error}=await sb.from('auction_listings')
+    .select('id, price, items(id, name, slot, rarity, rolled_stats, class_restriction)')
+    .is('seller_character_id',null)
+    .is('sold_at',null)
+    .order('price',{ascending:true});
+  if(error){console.error('loadStore failed',error);return;}
+  storeListings=data||[];
+  renderStore();
+}
+function renderStore(){
+  const list=document.getElementById('store-list');
+  if(storeListings.length===0){list.innerHTML='<div style="font-size:12px;opacity:.5;">Sold out for today.</div>';return;}
+  list.innerHTML=storeListings.map(listing=>{
+    const it=listing.items;
+    const restricted=it.class_restriction&&it.class_restriction!==character.class;
+    const tooExpensive=character.gold<listing.price;
+    return `<div class="store-item">
+      <div><span class="rarity-${it.rarity}">${it.name}</span><br><span style="opacity:.6;font-size:11px;">${formatStats(it.rolled_stats)}</span><br><span class="store-price">${listing.price} gold</span></div>
+      <button class="buy-btn" data-buy="${listing.id}" ${restricted||tooExpensive?'disabled':''} title="${restricted?'Wrong class':tooExpensive?'Not enough gold':''}">Buy</button>
+    </div>`;
+  }).join('');
+  list.querySelectorAll('[data-buy]').forEach(btn=>btn.addEventListener('click',()=>buyFromStore(btn.dataset.buy)));
+}
+async function buyFromStore(listingId){
+  const data=await callFn('auction-buy',{session_token:session,listing_id:listingId});
+  if(!data.ok){alert(data.message||'Purchase failed.');return;}
+  character.gold=data.new_gold_total;
+  renderCharSheet();
+  await Promise.all([loadStore(),loadInventory()]);
 }
 
 // ── Inventory ────────────────────────────────────────────────────────────
