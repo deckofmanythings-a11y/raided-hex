@@ -102,7 +102,7 @@
 // Bumped on every push so it's obvious in-app whether you're looking at the
 // latest deployed build (GitHub Pages + Discord's Activity iframe can both cache
 // aggressively) -- shown as a small tag, bottom-right, on every screen.
-const APP_VERSION='0.1.0';
+const APP_VERSION='0.1.1';
 document.getElementById('version-tag').textContent='v'+APP_VERSION;
 
 // ── Config ───────────────────────────────────────────────────────────────
@@ -255,7 +255,7 @@ function renderStore(){
     const restricted=it.class_restriction&&it.class_restriction!==character.class;
     const tooExpensive=character.gold<listing.price;
     return `<div class="store-item">
-      <div><span class="rarity-${it.rarity}">${it.name}</span><br><span style="opacity:.6;font-size:11px;">${formatStats(it.rolled_stats)}</span>${formatEffects(it.effects)}<br><span class="store-price">${listing.price} gold</span></div>
+      <div><span class="rarity-${it.rarity}">${it.name}</span> <span style="font-size:11px;">${formatClassLabel(it.class_restriction)}</span><br><span style="opacity:.6;font-size:11px;">${formatStats(it.rolled_stats)}</span>${formatEffects(it.effects)}<br><span class="store-price">${listing.price} gold</span></div>
       <button class="buy-btn" data-buy="${listing.id}" ${restricted||tooExpensive?'disabled':''} title="${restricted?'Wrong class':tooExpensive?'Not enough gold':''}">Buy</button>
     </div>`;
   }).join('');
@@ -287,6 +287,12 @@ function formatStats(stats){
   if(!stats)return'';
   return Object.entries(stats).map(([k,v])=>`${k.toUpperCase()} +${v}`).join(' · ');
 }
+function formatClassLabel(classRestriction){
+  if(!classRestriction)return'<span style="opacity:.5;">Any class</span>';
+  const label=classRestriction.charAt(0).toUpperCase()+classRestriction.slice(1);
+  const mismatch=character&&classRestriction!==character.class;
+  return `<span style="${mismatch?'color:#ff8a9a;':'opacity:.5;'}">${label} only</span>`;
+}
 function formatEffects(effects){
   if(!effects)return'';
   const badges=[];
@@ -308,7 +314,7 @@ function renderInventory(){
     const it=row.items;
     const restricted=it.class_restriction&&it.class_restriction!==character.class;
     return `<div class="bag-item">
-      <div><span class="rarity-${it.rarity}">${it.name}</span><br><span style="opacity:.6;font-size:11px;">${formatStats(it.rolled_stats)}</span>${formatEffects(it.effects)}</div>
+      <div><span class="rarity-${it.rarity}">${it.name}</span> <span style="font-size:11px;">${formatClassLabel(it.class_restriction)}</span><br><span style="opacity:.6;font-size:11px;">${formatStats(it.rolled_stats)}</span>${formatEffects(it.effects)}</div>
       <div class="actions">
         <button data-eq="${row.id}" ${restricted?'disabled title="Wrong class"':''}>Equip</button>
         <button class="sell-btn" data-sell="${row.id}">Sell</button>
