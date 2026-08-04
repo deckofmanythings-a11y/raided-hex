@@ -59,6 +59,9 @@
   .mortal-wound-line{color:#ff6b81;font-weight:600;}
   .permadeath-line{color:#ff2d4d;font-weight:700;}
   #version-tag{position:fixed;bottom:6px;right:8px;font-size:10px;opacity:.4;font-family:monospace;z-index:999;}
+  .mausoleum-entry{border:1px solid #3a2d4d;border-radius:6px;padding:8px 10px;margin-bottom:6px;font-size:12px;background:#181220;}
+  .mausoleum-entry .epitaph{font-style:italic;opacity:.55;font-size:11px;margin-top:2px;}
+  .mausoleum-entry b{color:#c9c2d6;}
 </style>
 </head>
 <body>
@@ -95,6 +98,9 @@
 
   <div class="section-title">Auction House (today's stock)</div>
   <div id="store-list"></div>
+
+  <div class="section-title">🪦 Mausoleum</div>
+  <div id="mausoleum-list"></div>
 </div>
 
 <script>
@@ -102,7 +108,7 @@
 // Bumped on every push so it's obvious in-app whether you're looking at the
 // latest deployed build (GitHub Pages + Discord's Activity iframe can both cache
 // aggressively) -- shown as a small tag, bottom-right, on every screen.
-const APP_VERSION='0.1.1';
+const APP_VERSION='0.2.0';
 document.getElementById('version-tag').textContent='v'+APP_VERSION;
 
 // ── Config ───────────────────────────────────────────────────────────────
@@ -233,6 +239,26 @@ function showGameScreen(){
   renderCharSheet();
   loadInventory();
   loadStore();
+  loadMausoleum();
+}
+
+// ── Mausoleum: memorial for permadeath'd characters ────────────────────────
+async function loadMausoleum(){
+  const{data,error}=await sb.from('characters')
+    .select('name, class, level, gold, died_at, bosses:died_to_boss_id(name)')
+    .eq('alive',false)
+    .order('died_at',{ascending:false});
+  const list=document.getElementById('mausoleum-list');
+  if(error){console.error('loadMausoleum failed',error);list.innerHTML='';return;}
+  if(!data||data.length===0){list.innerHTML='<div style="font-size:12px;opacity:.5;">No fallen heroes yet.</div>';return;}
+  list.innerHTML=data.map(c=>{
+    const date=c.died_at?new Date(c.died_at).toLocaleDateString(undefined,{year:'numeric',month:'short',day:'numeric'}):'unknown date';
+    const bossName=c.bosses?.name||'an unknown foe';
+    return `<div class="mausoleum-entry">
+      <b>${c.name}</b> — Lv ${c.level} ${c.class}, ${c.gold} gold to their name
+      <div class="epitaph">Fell to ${bossName} on ${date}</div>
+    </div>`;
+  }).join('');
 }
 
 // ── Auction house (daily system store, not player trading) ────────────────
