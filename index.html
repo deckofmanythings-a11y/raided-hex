@@ -58,11 +58,13 @@
   .fight-summary{font-weight:600;margin-top:4px;}
   .mortal-wound-line{color:#ff6b81;font-weight:600;}
   .permadeath-line{color:#ff2d4d;font-weight:700;}
+  #version-tag{position:fixed;bottom:6px;right:8px;font-size:10px;opacity:.4;font-family:monospace;z-index:999;}
 </style>
 </head>
 <body>
 
 <div id="auth-status">Connecting…</div>
+<div id="version-tag"></div>
 
 <div id="screen-create" class="screen">
   <h1>Create Your Character</h1>
@@ -96,6 +98,13 @@
 </div>
 
 <script>
+// ── Version ──────────────────────────────────────────────────────────────
+// Bumped on every push so it's obvious in-app whether you're looking at the
+// latest deployed build (GitHub Pages + Discord's Activity iframe can both cache
+// aggressively) -- shown as a small tag, bottom-right, on every screen.
+const APP_VERSION='1.0.0';
+document.getElementById('version-tag').textContent='v'+APP_VERSION;
+
 // ── Config ───────────────────────────────────────────────────────────────
 // isDiscordActivity() detection and the /.proxy/supabase URL rewrite mirror
 // heavenly-aces-casino/index.html exactly -- Discord Activities can only reach
