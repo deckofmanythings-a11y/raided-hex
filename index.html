@@ -442,7 +442,7 @@ document.getElementById('attack-btn').addEventListener('click',async()=>{
   });
 
   log.appendChild(fightBlock);
-  log.scrollTop=log.scrollHeight;
+  requestAnimationFrame(()=>{requestAnimationFrame(()=>{log.scrollTop=log.scrollHeight;});});
   renderCharSheet();
   await loadInventory();
 });
