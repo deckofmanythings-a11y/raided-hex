@@ -6,6 +6,7 @@
 <title>Raided Hex</title>
 <script src="supabase-js.bundle.js?v=1"></script>
 <script src="discord-embedded-app-sdk.js?v=1"></script>
+<script src="paperdoll.js?v=1"></script>
 <style>
   :root{color-scheme:dark;}
   body{margin:0;font-family:system-ui,sans-serif;background:#14101c;color:#eee0f5;min-height:100vh;}
@@ -70,6 +71,19 @@
   #crunch-panel .formula{opacity:.6;}
   #crunch-panel .result{color:#ffd27a;}
   #crunch-panel .crunch-row{white-space:pre;}
+  /* Paper doll -- see paperdoll.js. Fixed integer scale on purpose: fluid sizing
+     would resample the sprites and undo the pixel art. */
+  .pd-wrap{width:calc(var(--pd-w)*var(--pd-scale));height:calc(var(--pd-h)*var(--pd-scale));flex:0 0 auto;}
+  .pd-stack{position:relative;width:100%;height:100%;}
+  .pd-layer,.pd-aura{position:absolute;inset:0;width:100%;height:100%;}
+  .pd-layer{image-rendering:pixelated;image-rendering:crisp-edges;}
+  .pd-aura{z-index:0;pointer-events:none;}
+  .pd-dead{filter:grayscale(1) brightness(.6);}
+  .pd-empty{position:absolute;inset:0;display:flex;align-items:center;justify-content:center;font-size:calc(var(--pd-scale)*22px);opacity:.18;z-index:0;}
+  .pd-portrait{display:flex;gap:14px;align-items:flex-start;margin-bottom:10px;}
+  .pd-portrait .pd-stats{flex:1 1 auto;min-width:0;}
+  .pd-frame{border:1px solid #3a2d4d;border-radius:8px;background:linear-gradient(#241b33,#171021);padding:4px;}
+  .class-card .pd-wrap{margin:0 auto 4px;}
 </style>
 </head>
 <body>
@@ -118,7 +132,7 @@
 // Bumped on every push so it's obvious in-app whether you're looking at the
 // latest deployed build (GitHub Pages + Discord's Activity iframe can both cache
 // aggressively) -- shown as a small tag, bottom-right, on every screen.
-const APP_VERSION='0.4.0';
+const APP_VERSION='0.5.0';
 document.getElementById('version-tag').textContent='v'+APP_VERSION;
 
 // ── Config ───────────────────────────────────────────────────────────────
@@ -223,7 +237,10 @@ function showCreateScreen(){
   CLASSES.forEach(c=>{
     const card=document.createElement('div');
     card.className='class-card';
-    card.innerHTML=`<b>${c.name}</b><span>${c.desc}</span>`;
+    // Unequipped base body, so class choice is a visual decision as well as a
+    // statistical one. scale:1 keeps two cards per row at the 480px max width.
+    PaperDoll.render(card,{classId:c.id,scale:1});
+    card.insertAdjacentHTML('beforeend',`<b>${c.name}</b><span>${c.desc}</span>`);
     card.onclick=()=>{selectedClass=c.id;[...grid.children].forEach(el=>el.classList.remove('selected'));card.classList.add('selected');validateCreateForm();};
     grid.appendChild(card);
   });
@@ -529,19 +546,33 @@ function renderCharSheet(){
   const wounds='☠️'.repeat(character.mortal_wounds)+'○'.repeat(Math.max(0,maxWounds-character.mortal_wounds));
   const xpNeeded=xpToNextLevel(character.level);
   sheet.innerHTML=`
-    <div class="row"><b>${character.name}</b><span>Lv ${character.level} ${character.class}</span></div>
-    <div class="row"><span>XP</span><span>${character.xp} / ${xpNeeded}</span></div>
+    <div class="pd-portrait">
+      <div class="pd-frame" id="pd-portrait-slot"></div>
+      <div class="pd-stats">
+        <div class="row"><b>${character.name}</b><span>Lv ${character.level} ${character.class}</span></div>
+        <div class="row"><span>XP</span><span>${character.xp} / ${xpNeeded}</span></div>
+        <div class="row"><span>Gold</span><span>${character.gold}</span></div>
+        <div class="row"><span>Attempts left</span><span>${character.attempts_remaining_today}</span></div>
+        <div class="row"><span>Mortal Wounds</span><span class="wounds">${wounds}</span></div>
+      </div>
+    </div>
     <div class="stat-grid">
       <div class="row"><span>Max HP</span><span>${stats.max_hp}</span></div>
       <div class="row"><span>Attack</span><span>${stats.attack_power}</span></div>
       <div class="row"><span>Defense</span><span>${stats.defense}</span></div>
       <div class="row"><span>Crit Chance</span><span>${Math.round(stats.crit_chance*100)}%</span></div>
       <div class="row"><span>Crit Damage</span><span>${stats.crit_multiplier}x</span></div>
-      <div class="row"><span>Attempts left</span><span>${character.attempts_remaining_today}</span></div>
     </div>
-    <div class="row"><span>Gold</span><span>${character.gold}</span></div>
-    <div class="row"><span>Mortal Wounds</span><span class="wounds">${wounds}</span></div>
   `;
+  // Rendered after innerHTML rather than inlined into it, because the layer stack
+  // is built as real DOM nodes (each layer needs its own onerror handler so a
+  // not-yet-generated sprite hides itself instead of showing a broken image).
+  PaperDoll.render(document.getElementById('pd-portrait-slot'),{
+    classId:character.class,
+    equipped:PaperDoll.equippedSignature(inventory),
+    dead:!character.alive,
+    scale:2,
+  });
 }
 document.getElementById('reroll-btn').addEventListener('click',()=>{character=null;showCreateScreen();});
 // A long fight (dozens of rounds) shows the opening, the final (fatal) round, and a

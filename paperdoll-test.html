@@ -1,0 +1,72 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Paper doll harness</title>
+<script src="paperdoll.js?v=1"></script>
+<style>
+  body{margin:0;background:#14101c;color:#eee0f5;font-family:system-ui,sans-serif;padding:16px;}
+  .pd-wrap{width:calc(var(--pd-w)*var(--pd-scale));height:calc(var(--pd-h)*var(--pd-scale));flex:0 0 auto;}
+  .pd-stack{position:relative;width:100%;height:100%;}
+  .pd-layer,.pd-aura{position:absolute;inset:0;width:100%;height:100%;}
+  .pd-layer{image-rendering:pixelated;}
+  .pd-aura{z-index:0;}
+  .pd-dead{filter:grayscale(1) brightness(.6);}
+  .pd-empty{position:absolute;inset:0;display:flex;align-items:center;justify-content:center;font-size:calc(var(--pd-scale)*22px);opacity:.18;z-index:0;}
+  .row{display:flex;gap:14px;flex-wrap:wrap;align-items:flex-start;}
+  .card{border:1px solid #3a2d4d;border-radius:8px;padding:8px;background:#1c1526;text-align:center;font-size:12px;}
+  select{background:#221a30;color:#eee0f5;border:1px solid #5a4a70;border-radius:5px;padding:3px;}
+  h3{font-size:13px;margin:18px 0 8px;}
+</style>
+</head>
+<body>
+<h3>All classes · rarity applied to every slot</h3>
+<label>Rarity <select id="rarity">
+  <option value="">none equipped</option>
+  <option>common</option><option>uncommon</option><option>rare</option><option>epic</option><option value="legendary" selected>legendary</option>
+</select></label>
+<label style="margin-left:12px;">Trinket <select id="trinket">
+  <option value="">none</option><option>uncommon</option><option>rare</option><option>epic</option><option value="legendary" selected>legendary</option>
+</select></label>
+<label style="margin-left:12px;"><input type="checkbox" id="dead"> dead</label>
+<div class="row" id="all" style="margin-top:12px;"></div>
+
+<h3>Warrior · one slot at a time (z-order / band check)</h3>
+<div class="row" id="solo"></div>
+
+<script>
+const CLASSES=['warrior','mage','rogue','cleric','ranger'];
+function draw(){
+  const r=document.getElementById('rarity').value;
+  const t=document.getElementById('trinket').value;
+  const dead=document.getElementById('dead').checked;
+  const all=document.getElementById('all');
+  all.innerHTML='';
+  CLASSES.forEach(c=>{
+    const card=document.createElement('div');card.className='card';
+    const holder=document.createElement('div');
+    const eq={};
+    if(r)PaperDoll.LAYER_ORDER.forEach(s=>eq[s]=r);
+    if(t)eq.trinket=t;
+    PaperDoll.render(holder,{classId:c,equipped:eq,dead,scale:2});
+    card.appendChild(holder);
+    card.insertAdjacentHTML('beforeend',`<div>${c}</div>`);
+    all.appendChild(card);
+  });
+
+  const solo=document.getElementById('solo');
+  solo.innerHTML='';
+  [null,...PaperDoll.LAYER_ORDER].forEach(slot=>{
+    const card=document.createElement('div');card.className='card';
+    const holder=document.createElement('div');
+    PaperDoll.render(holder,{classId:'warrior',equipped:slot?{[slot]:'rare'}:{},scale:2});
+    card.appendChild(holder);
+    card.insertAdjacentHTML('beforeend',`<div>${slot||'body only'}</div>`);
+    solo.appendChild(card);
+  });
+}
+['rarity','trinket','dead'].forEach(id=>document.getElementById(id).addEventListener('change',draw));
+draw();
+</script>
+</body>
+</html>
