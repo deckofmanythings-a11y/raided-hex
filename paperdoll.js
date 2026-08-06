@@ -20,7 +20,7 @@ const PaperDoll=(()=>{
   // iframe both cache aggressively, so the sprites carry the same kind of ?v=
   // cache-buster the <script> tags do -- without it a re-generated sprite can
   // keep serving the stale version for ~10 minutes.
-  const ART_VERSION='1';
+  const ART_VERSION='2';
 
   // Draw order, back to front. Legs/feet go under the chest piece so a long
   // tabard or robe hangs over them; hands sit above the chest (bracers overlap
